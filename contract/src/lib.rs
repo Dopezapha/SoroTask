@@ -24,6 +24,10 @@ pub enum Error {
     ArgsTooMany = 13,
     ArgsTooLarge = 14,
     InvalidPayload = 15,
+    ProtocolPaused = 16,
+    AccountPaused = 17,
+    AdminTaskPaused = 18,
+    AdminNotInitialized = 19,
 }
 
 /// Maximum number of arguments allowed in a task payload
@@ -31,6 +35,9 @@ const MAX_ARGS_COUNT: u32 = 32;
 
 /// Maximum serialized size of arguments in bytes (approx 4KB limit for Soroban)
 const MAX_ARGS_SIZE_BYTES: u32 = 4096;
+
+/// Bounded active-task buckets keep writes from growing with total task volume.
+const ACTIVE_BUCKET_SIZE: u64 = 128;
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -62,43 +69,96 @@ pub enum DataKey {
     ActiveTasks,
     Token,
     TaskDependencies(u64),
+    Admin,
+    ProtocolPaused,
+    PausedAccount(Address),
+    AdminPausedTask(u64),
+    ActiveBucket(u64),
 }
 
-fn get_active_task_ids(env: &Env) -> Vec<u64> {
+fn active_bucket_id(task_id: u64) -> u64 {
+    (task_id - 1) / ACTIVE_BUCKET_SIZE
+}
+
+fn get_active_task_ids(env: &Env, bucket_id: u64) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::ActiveBucket(bucket_id))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+fn set_active_task_ids(env: &Env, bucket_id: u64, task_ids: &Vec<u64>) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::ActiveBucket(bucket_id), task_ids);
+}
+
+fn get_legacy_active_task_ids(env: &Env) -> Vec<u64> {
     env.storage()
         .persistent()
         .get(&DataKey::ActiveTasks)
         .unwrap_or_else(|| Vec::new(env))
 }
 
-fn set_active_task_ids(env: &Env, task_ids: &Vec<u64>) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::ActiveTasks, task_ids);
-}
-
-fn add_active_task_id(env: &Env, task_id: u64) {
-    let mut active = get_active_task_ids(env);
+fn bucket_contains_task(env: &Env, task_id: u64) -> bool {
+    let active = get_active_task_ids(env, active_bucket_id(task_id));
     let len = active.len();
     let mut i = 0;
 
     while i < len {
-        if active
-            .get(i)
-            .expect("active task index out of bounds")
-            == task_id
+        if active.get(i).expect("active task index out of bounds") == task_id {
+            return true;
+        }
+        i += 1;
+    }
+
+    false
+}
+
+fn push_if_executable(env: &Env, output: &mut Vec<ExecutableTask>, task_id: u64, now: u64) {
+    if is_admin_task_paused(env, task_id) {
+        return;
+    }
+
+    if let Some(config) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, TaskConfig>(&DataKey::Task(task_id))
+    {
+        if config.is_active
+            && !is_account_paused(env, &config.creator)
+            && now >= config.last_run + config.interval
         {
+            output.push_back(ExecutableTask {
+                task_id,
+                target: config.target,
+                function: config.function,
+                args: config.args,
+            });
+        }
+    }
+}
+
+fn add_active_task_id(env: &Env, task_id: u64) {
+    let bucket_id = active_bucket_id(task_id);
+    let mut active = get_active_task_ids(env, bucket_id);
+    let len = active.len();
+    let mut i = 0;
+
+    while i < len {
+        if active.get(i).expect("active task index out of bounds") == task_id {
             return;
         }
         i += 1;
     }
 
     active.push_back(task_id);
-    set_active_task_ids(env, &active);
+    set_active_task_ids(env, bucket_id, &active);
 }
 
 fn remove_active_task_id(env: &Env, task_id: u64) {
-    let active = get_active_task_ids(env);
+    let bucket_id = active_bucket_id(task_id);
+    let active = get_active_task_ids(env, bucket_id);
     let mut filtered = Vec::new(env);
     let len = active.len();
     let mut i = 0;
@@ -114,7 +174,56 @@ fn remove_active_task_id(env: &Env, task_id: u64) {
         i += 1;
     }
 
-    set_active_task_ids(env, &filtered);
+    set_active_task_ids(env, bucket_id, &filtered);
+}
+
+fn require_admin(env: &Env) -> Address {
+    let admin = env
+        .storage()
+        .instance()
+        .get::<DataKey, Address>(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(env, Error::AdminNotInitialized));
+    admin.require_auth();
+    admin
+}
+
+fn is_protocol_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProtocolPaused)
+        .unwrap_or(false)
+}
+
+fn is_account_paused(env: &Env, account: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::PausedAccount(account.clone()))
+        .unwrap_or(false)
+}
+
+fn is_admin_task_paused(env: &Env, task_id: u64) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::AdminPausedTask(task_id))
+        .unwrap_or(false)
+}
+
+fn require_protocol_live(env: &Env) {
+    if is_protocol_paused(env) {
+        panic_with_error!(env, Error::ProtocolPaused);
+    }
+}
+
+fn require_account_live(env: &Env, account: &Address) {
+    if is_account_paused(env, account) {
+        panic_with_error!(env, Error::AccountPaused);
+    }
+}
+
+fn require_task_not_admin_paused(env: &Env, task_id: u64) {
+    if is_admin_task_paused(env, task_id) {
+        panic_with_error!(env, Error::AdminTaskPaused);
+    }
 }
 
 #[contracttype]
@@ -139,19 +248,19 @@ impl SoroTaskContract {
     /// Returns Ok(()) if valid, or an error code if validation fails.
     fn validate_args(args: &Vec<Val>) -> Result<(), Error> {
         let args_count = args.len();
-        
+
         // Validate argument count
         if args_count > MAX_ARGS_COUNT {
             return Err(Error::ArgsTooMany);
         }
-        
+
         // Estimate serialized size (each Val is at least 8 bytes + overhead)
         // This is a conservative estimate since Val representation varies
         let estimated_size = args_count * 64; // 64 bytes per Val as upper bound
         if estimated_size > MAX_ARGS_SIZE_BYTES {
             return Err(Error::ArgsTooLarge);
         }
-        
+
         Ok(())
     }
 
@@ -185,6 +294,9 @@ impl SoroTaskContract {
     //   * That IDs are stable across contract re-deployments — a fresh
     //     deployment resets DataKey::Counter to 0.
     pub fn register(env: Env, mut config: TaskConfig) -> u64 {
+        require_protocol_live(&env);
+        require_account_live(&env, &config.creator);
+
         // Ensure the creator has authorized the registration
         config.creator.require_auth();
 
@@ -218,7 +330,11 @@ impl SoroTaskContract {
 
         // Emit TaskRegistered event
         env.events().publish(
-            (Symbol::new(&env, "TaskRegistered"), Symbol::new(&env, "v1"), counter),
+            (
+                Symbol::new(&env, "TaskRegistered"),
+                Symbol::new(&env, "v1"),
+                counter,
+            ),
             config.creator.clone(),
         );
 
@@ -231,35 +347,60 @@ impl SoroTaskContract {
     }
 
     pub fn monitor(env: Env) -> Vec<ExecutableTask> {
+        if is_protocol_paused(&env) {
+            return Vec::new(&env);
+        }
+
         let now = env.ledger().timestamp();
         let mut executable = Vec::new(&env);
+        let counter: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Counter)
+            .unwrap_or(0);
+        let bucket_count = if counter == 0 {
+            0
+        } else {
+            active_bucket_id(counter) + 1
+        };
 
-        let active_task_ids = get_active_task_ids(&env);
-        let len = active_task_ids.len();
-        let mut i = 0;
+        let mut bucket_id = 0;
+        while bucket_id < bucket_count {
+            let active_task_ids = get_active_task_ids(&env, bucket_id);
+            let len = active_task_ids.len();
+            let mut i = 0;
 
-        while i < len {
-            let task_id = active_task_ids
-                .get(i)
-                .expect("active task index out of bounds")
-                .clone();
-            if let Some(config) = env.storage().persistent().get::<DataKey, TaskConfig>(&DataKey::Task(task_id)) {
-                if config.is_active && now >= config.last_run + config.interval {
-                    executable.push_back(ExecutableTask {
-                        task_id,
-                        target: config.target,
-                        function: config.function,
-                        args: config.args,
-                    });
-                }
+            while i < len {
+                let task_id = active_task_ids
+                    .get(i)
+                    .expect("active task index out of bounds")
+                    .clone();
+                push_if_executable(&env, &mut executable, task_id, now);
+                i += 1;
             }
-            i += 1;
+            bucket_id += 1;
+        }
+
+        let legacy_task_ids = get_legacy_active_task_ids(&env);
+        let legacy_len = legacy_task_ids.len();
+        let mut legacy_i = 0;
+        while legacy_i < legacy_len {
+            let task_id = legacy_task_ids
+                .get(legacy_i)
+                .expect("legacy active task index out of bounds")
+                .clone();
+            if !bucket_contains_task(&env, task_id) {
+                push_if_executable(&env, &mut executable, task_id, now);
+            }
+            legacy_i += 1;
         }
 
         executable
     }
 
     pub fn pause_task(env: Env, task_id: u64) {
+        require_protocol_live(&env);
+
         let task_key = DataKey::Task(task_id);
         let mut config: TaskConfig = env
             .storage()
@@ -279,12 +420,19 @@ impl SoroTaskContract {
         remove_active_task_id(&env, task_id);
 
         env.events().publish(
-            (Symbol::new(&env, "TaskPaused"), Symbol::new(&env, "v1"), task_id),
+            (
+                Symbol::new(&env, "TaskPaused"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
             config.creator.clone(),
         );
     }
 
     pub fn resume_task(env: Env, task_id: u64) {
+        require_protocol_live(&env);
+        require_task_not_admin_paused(&env, task_id);
+
         let task_key = DataKey::Task(task_id);
         let mut config: TaskConfig = env
             .storage()
@@ -304,12 +452,20 @@ impl SoroTaskContract {
         add_active_task_id(&env, task_id);
 
         env.events().publish(
-            (Symbol::new(&env, "TaskResumed"), Symbol::new(&env, "v1"), task_id),
+            (
+                Symbol::new(&env, "TaskResumed"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
             config.creator.clone(),
         );
     }
 
     pub fn monitor_paginated(env: Env, start_id: u64, limit: u64) -> Vec<ExecutableTask> {
+        if is_protocol_paused(&env) {
+            return Vec::new(&env);
+        }
+
         let now = env.ledger().timestamp();
         let counter: u64 = env
             .storage()
@@ -328,37 +484,49 @@ impl SoroTaskContract {
         }
 
         let end_id = start_id.saturating_add(limit.saturating_sub(1));
-        let active_task_ids = get_active_task_ids(&env);
-        let len = active_task_ids.len();
-        let mut i = 0;
+        let mut bucket_id = active_bucket_id(start_id);
+        let end_bucket_id = active_bucket_id(end_id);
 
-        while i < len {
-            let task_id = active_task_ids
-                .get(i)
-                .expect("active task index out of bounds")
-                .clone();
+        while bucket_id <= end_bucket_id {
+            let active_task_ids = get_active_task_ids(&env, bucket_id);
+            let len = active_task_ids.len();
+            let mut i = 0;
 
-            if task_id < start_id {
-                i += 1;
-                continue;
-            }
+            while i < len {
+                let task_id = active_task_ids
+                    .get(i)
+                    .expect("active task index out of bounds")
+                    .clone();
 
-            if task_id > end_id {
-                break;
-            }
-
-            if let Some(config) = env.storage().persistent().get::<DataKey, TaskConfig>(&DataKey::Task(task_id)) {
-                if config.is_active && now >= config.last_run + config.interval {
-                    executable.push_back(ExecutableTask {
-                        task_id,
-                        target: config.target,
-                        function: config.function,
-                        args: config.args,
-                    });
+                if task_id < start_id {
+                    i += 1;
+                    continue;
                 }
+
+                if task_id > end_id {
+                    break;
+                }
+
+                push_if_executable(&env, &mut executable, task_id, now);
+
+                i += 1;
             }
 
-            i += 1;
+            bucket_id += 1;
+        }
+
+        let legacy_task_ids = get_legacy_active_task_ids(&env);
+        let legacy_len = legacy_task_ids.len();
+        let mut legacy_i = 0;
+        while legacy_i < legacy_len {
+            let task_id = legacy_task_ids
+                .get(legacy_i)
+                .expect("legacy active task index out of bounds")
+                .clone();
+            if task_id >= start_id && task_id <= end_id && !bucket_contains_task(&env, task_id) {
+                push_if_executable(&env, &mut executable, task_id, now);
+            }
+            legacy_i += 1;
         }
 
         executable
@@ -383,6 +551,10 @@ impl SoroTaskContract {
     /// cross-contract call returns, guaranteeing it only reflects completed
     /// executions.
     pub fn execute(env: Env, keeper: Address, task_id: u64) {
+        require_protocol_live(&env);
+        require_task_not_admin_paused(&env, task_id);
+        require_account_live(&env, &keeper);
+
         keeper.require_auth();
         let task_key = DataKey::Task(task_id);
         let mut config: TaskConfig = env
@@ -390,6 +562,8 @@ impl SoroTaskContract {
             .persistent()
             .get(&task_key)
             .expect("Task not found");
+
+        require_account_live(&env, &config.creator);
 
         if !config.is_active {
             panic_with_error!(&env, Error::TaskPaused);
@@ -470,8 +644,14 @@ impl SoroTaskContract {
             env.storage().persistent().set(&task_key, &config);
 
             // Emit keeper paid event
-            env.events()
-                .publish((Symbol::new(&env, "KeeperPaid"), Symbol::new(&env, "v1"), task_id), (keeper, fee));
+            env.events().publish(
+                (
+                    Symbol::new(&env, "KeeperPaid"),
+                    Symbol::new(&env, "v1"),
+                    task_id,
+                ),
+                (keeper, fee),
+            );
         }
     }
 
@@ -484,13 +664,140 @@ impl SoroTaskContract {
 
         // Emit initialized event
         env.events().publish(
-            (Symbol::new(&env, "ContractInitialized"), Symbol::new(&env, "v1")),
+            (
+                Symbol::new(&env, "ContractInitialized"),
+                Symbol::new(&env, "v1"),
+            ),
             token,
         );
     }
 
+    /// Initializes the admin address used for emergency controls.
+    pub fn init_admin(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic_with_error!(&env, Error::AlreadyInitialized);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "AdminInitialized"),
+                Symbol::new(&env, "v1"),
+            ),
+            admin,
+        );
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Admin not initialized")
+    }
+
+    pub fn set_admin(env: Env, new_admin: Address) {
+        let old_admin = require_admin(&env);
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.events().publish(
+            (Symbol::new(&env, "AdminChanged"), Symbol::new(&env, "v1")),
+            (old_admin, new_admin),
+        );
+    }
+
+    pub fn admin_pause_protocol(env: Env) {
+        let admin = require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProtocolPaused, &true);
+        env.events().publish(
+            (Symbol::new(&env, "ProtocolPaused"), Symbol::new(&env, "v1")),
+            admin,
+        );
+    }
+
+    pub fn admin_resume_protocol(env: Env) {
+        let admin = require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProtocolPaused, &false);
+        env.events().publish(
+            (
+                Symbol::new(&env, "ProtocolResumed"),
+                Symbol::new(&env, "v1"),
+            ),
+            admin,
+        );
+    }
+
+    pub fn is_protocol_paused(env: Env) -> bool {
+        is_protocol_paused(&env)
+    }
+
+    pub fn admin_pause_task(env: Env, task_id: u64) {
+        let admin = require_admin(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminPausedTask(task_id), &true);
+        env.events().publish(
+            (
+                Symbol::new(&env, "AdminTaskPaused"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
+            admin,
+        );
+    }
+
+    pub fn admin_resume_task(env: Env, task_id: u64) {
+        let admin = require_admin(&env);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::AdminPausedTask(task_id));
+        env.events().publish(
+            (
+                Symbol::new(&env, "AdminTaskResumed"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
+            admin,
+        );
+    }
+
+    pub fn is_admin_task_paused(env: Env, task_id: u64) -> bool {
+        is_admin_task_paused(&env, task_id)
+    }
+
+    pub fn admin_pause_account(env: Env, account: Address) {
+        let admin = require_admin(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::PausedAccount(account.clone()), &true);
+        env.events().publish(
+            (Symbol::new(&env, "AccountPaused"), Symbol::new(&env, "v1")),
+            (admin, account),
+        );
+    }
+
+    pub fn admin_resume_account(env: Env, account: Address) {
+        let admin = require_admin(&env);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::PausedAccount(account.clone()));
+        env.events().publish(
+            (Symbol::new(&env, "AccountResumed"), Symbol::new(&env, "v1")),
+            (admin, account),
+        );
+    }
+
+    pub fn is_account_paused(env: Env, account: Address) -> bool {
+        is_account_paused(&env, &account)
+    }
+
     /// Deposits gas tokens to a task's balance.
     pub fn deposit_gas(env: Env, task_id: u64, from: Address, amount: i128) {
+        require_protocol_live(&env);
+        require_account_live(&env, &from);
+
         from.require_auth();
 
         let task_key = DataKey::Task(task_id);
@@ -515,13 +822,21 @@ impl SoroTaskContract {
         env.storage().persistent().set(&task_key, &config);
 
         // Emit event
-        env.events()
-            .publish((Symbol::new(&env, "GasDeposited"), Symbol::new(&env, "v1"), task_id), (from, amount));
+        env.events().publish(
+            (
+                Symbol::new(&env, "GasDeposited"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
+            (from, amount),
+        );
     }
 
     /// Withdraws gas tokens from a task's balance.
     /// Only the task creator can withdraw.
     pub fn withdraw_gas(env: Env, task_id: u64, amount: i128) {
+        require_protocol_live(&env);
+
         let task_key = DataKey::Task(task_id);
         let mut config: TaskConfig = env
             .storage()
@@ -530,6 +845,7 @@ impl SoroTaskContract {
             .expect("Task not found");
 
         // Ensure only creator can withdraw
+        require_account_live(&env, &config.creator);
         config.creator.require_auth();
 
         if config.gas_balance < amount {
@@ -552,13 +868,19 @@ impl SoroTaskContract {
 
         // Emit event
         env.events().publish(
-            (Symbol::new(&env, "GasWithdrawn"), Symbol::new(&env, "v1"), task_id),
+            (
+                Symbol::new(&env, "GasWithdrawn"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
             (config.creator.clone(), amount),
         );
     }
 
     /// Cancels a task, refunds remaining gas, and removes it from storage.
     pub fn cancel_task(env: Env, task_id: u64) {
+        require_protocol_live(&env);
+
         let task_key = DataKey::Task(task_id);
         let config: TaskConfig = env
             .storage()
@@ -567,18 +889,19 @@ impl SoroTaskContract {
             .expect("Task not found");
 
         // Validate: Only creator can cancel
+        require_account_live(&env, &config.creator);
         config.creator.require_auth();
 
         // Refund: Automatically withdraw all remaining gas_balance to the creator
         if config.gas_balance > 0 {
             if env.storage().instance().has(&DataKey::Token) {
-                let token_address: Address = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::Token)
-                    .unwrap();
+                let token_address: Address = env.storage().instance().get(&DataKey::Token).unwrap();
                 let token_client = soroban_sdk::token::Client::new(&env, &token_address);
-                token_client.transfer(&env.current_contract_address(), &config.creator, &config.gas_balance);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &config.creator,
+                    &config.gas_balance,
+                );
             }
         }
 
@@ -591,7 +914,11 @@ impl SoroTaskContract {
         let refund_amount = config.gas_balance;
         // Events: TaskCancelled(u64, i128) with data: (creator, amount_refunded)
         env.events().publish(
-            (Symbol::new(&env, "TaskCancelled"), Symbol::new(&env, "v1"), task_id),
+            (
+                Symbol::new(&env, "TaskCancelled"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
             (config.creator.clone(), refund_amount),
         );
     }
@@ -607,23 +934,26 @@ impl SoroTaskContract {
     /// Adds a dependency relationship between tasks.
     /// task_id will be blocked by depends_on_task_id.
     pub fn add_dependency(env: Env, task_id: u64, depends_on_task_id: u64) {
+        require_protocol_live(&env);
+
         // Validate both tasks exist
         let task: TaskConfig = env
             .storage()
             .persistent()
             .get(&DataKey::Task(task_id))
             .expect("Task not found");
-        
+
         let depends_on_task: Option<TaskConfig> = env
             .storage()
             .persistent()
             .get(&DataKey::Task(depends_on_task_id));
-        
+
         if depends_on_task.is_none() {
             panic_with_error!(&env, Error::DependencyNotFound);
         }
 
         // Only task creator can add dependencies
+        require_account_live(&env, &task.creator);
         task.creator.require_auth();
 
         // Prevent self-dependency
@@ -646,7 +976,11 @@ impl SoroTaskContract {
 
             // Emit event
             env.events().publish(
-                (Symbol::new(&env, "DependencyAdded"), Symbol::new(&env, "v1"), task_id),
+                (
+                    Symbol::new(&env, "DependencyAdded"),
+                    Symbol::new(&env, "v1"),
+                    task_id,
+                ),
                 depends_on_task_id,
             );
         }
@@ -654,6 +988,8 @@ impl SoroTaskContract {
 
     /// Removes a dependency relationship between tasks.
     pub fn remove_dependency(env: Env, task_id: u64, depends_on_task_id: u64) {
+        require_protocol_live(&env);
+
         let task: TaskConfig = env
             .storage()
             .persistent()
@@ -661,11 +997,12 @@ impl SoroTaskContract {
             .expect("Task not found");
 
         // Only task creator can remove dependencies
+        require_account_live(&env, &task.creator);
         task.creator.require_auth();
 
         let mut updated_task = task.clone();
         let mut new_blocked_by = Vec::new(&env);
-        
+
         for i in 0..updated_task.blocked_by.len() {
             let dep = updated_task.blocked_by.get(i).unwrap();
             if dep != depends_on_task_id {
@@ -680,18 +1017,19 @@ impl SoroTaskContract {
 
         // Emit event
         env.events().publish(
-            (Symbol::new(&env, "DependencyRemoved"), Symbol::new(&env, "v1"), task_id),
+            (
+                Symbol::new(&env, "DependencyRemoved"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
             depends_on_task_id,
         );
     }
 
     /// Gets all dependencies for a task (tasks that block this task).
     pub fn get_dependencies(env: Env, task_id: u64) -> Vec<u64> {
-        let task: Option<TaskConfig> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Task(task_id));
-        
+        let task: Option<TaskConfig> = env.storage().persistent().get(&DataKey::Task(task_id));
+
         match task {
             Some(t) => t.blocked_by,
             None => Vec::new(&env),
@@ -700,19 +1038,14 @@ impl SoroTaskContract {
 
     /// Checks if a task is blocked by any incomplete dependencies.
     pub fn is_task_blocked(env: Env, task_id: u64) -> bool {
-        let task: Option<TaskConfig> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Task(task_id));
-        
+        let task: Option<TaskConfig> = env.storage().persistent().get(&DataKey::Task(task_id));
+
         if let Some(t) = task {
             for i in 0..t.blocked_by.len() {
                 let dep_id = t.blocked_by.get(i).unwrap();
-                let dep_task: Option<TaskConfig> = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::Task(dep_id));
-                
+                let dep_task: Option<TaskConfig> =
+                    env.storage().persistent().get(&DataKey::Task(dep_id));
+
                 // If dependency doesn't exist or hasn't run yet, task is blocked
                 if dep_task.is_none() || dep_task.unwrap().last_run == 0 {
                     return true;
@@ -740,10 +1073,7 @@ impl SoroTaskContract {
 
         visited.push_back(from);
 
-        let task: Option<TaskConfig> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Task(from));
+        let task: Option<TaskConfig> = env.storage().persistent().get(&DataKey::Task(from));
 
         if let Some(t) = task {
             for i in 0..t.blocked_by.len() {
@@ -891,7 +1221,11 @@ mod tests {
         env.storage().persistent().set(&task_key, &updated);
 
         env.events().publish(
-            (Symbol::new(&env, "TaskUpdated"), Symbol::new(&env, "v1"), task_id),
+            (
+                Symbol::new(&env, "TaskUpdated"),
+                Symbol::new(&env, "v1"),
+                task_id,
+            ),
             updated.creator.clone(),
         );
     }
@@ -1509,6 +1843,118 @@ mod tests {
         assert_eq!(resumed.get(0).unwrap().task_id, task_id);
     }
 
+    #[test]
+    fn test_monitor_paginated_reads_across_active_buckets() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let target = env.register_contract(None, MockTarget);
+        for _ in 0..(ACTIVE_BUCKET_SIZE + 2) {
+            client.register(&base_config(&env, target.clone()));
+        }
+
+        env.ledger().set_timestamp(10_000);
+
+        let page = client.monitor_paginated(&(ACTIVE_BUCKET_SIZE - 1), &4);
+        assert_eq!(page.len(), 4);
+        assert_eq!(page.get(0).unwrap().task_id, ACTIVE_BUCKET_SIZE - 1);
+        assert_eq!(page.get(1).unwrap().task_id, ACTIVE_BUCKET_SIZE);
+        assert_eq!(page.get(2).unwrap().task_id, ACTIVE_BUCKET_SIZE + 1);
+        assert_eq!(page.get(3).unwrap().task_id, ACTIVE_BUCKET_SIZE + 2);
+    }
+
+    #[test]
+    fn test_admin_protocol_pause_blocks_registration_and_monitoring() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let admin = Address::generate(&env);
+        let target = env.register_contract(None, MockTarget);
+        client.init_admin(&admin);
+        client.register(&base_config(&env, target.clone()));
+
+        env.ledger().set_timestamp(10_000);
+        assert_eq!(client.monitor().len(), 1);
+
+        client.admin_pause_protocol();
+        assert!(client.is_protocol_paused());
+        assert_eq!(client.monitor().len(), 0);
+
+        let result = client.try_register(&base_config(&env, target));
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                Error::ProtocolPaused as u32
+            )))
+        );
+
+        client.admin_resume_protocol();
+        assert!(!client.is_protocol_paused());
+        assert_eq!(client.monitor().len(), 1);
+    }
+
+    #[test]
+    fn test_admin_task_pause_overrides_creator_resume() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let admin = Address::generate(&env);
+        let target = env.register_contract(None, MockTarget);
+        client.init_admin(&admin);
+        let task_id = client.register(&base_config(&env, target));
+
+        env.ledger().set_timestamp(10_000);
+        client.admin_pause_task(&task_id);
+        assert!(client.is_admin_task_paused(&task_id));
+        assert_eq!(client.monitor().len(), 0);
+
+        let result = client.try_resume_task(&task_id);
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                Error::AdminTaskPaused as u32
+            )))
+        );
+
+        client.admin_resume_task(&task_id);
+        assert!(!client.is_admin_task_paused(&task_id));
+        assert_eq!(client.monitor().len(), 1);
+    }
+
+    #[test]
+    fn test_admin_account_pause_blocks_new_tasks_and_hides_existing_tasks() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let admin = Address::generate(&env);
+        let target = env.register_contract(None, MockTarget);
+        let mut cfg = base_config(&env, target.clone());
+        let creator = cfg.creator.clone();
+
+        client.init_admin(&admin);
+        client.register(&cfg);
+
+        env.ledger().set_timestamp(10_000);
+        assert_eq!(client.monitor().len(), 1);
+
+        client.admin_pause_account(&creator);
+        assert!(client.is_account_paused(&creator));
+        assert_eq!(client.monitor().len(), 0);
+
+        cfg.target = target;
+        let result = client.try_register(&cfg);
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                Error::AccountPaused as u32
+            )))
+        );
+
+        client.admin_resume_account(&creator);
+        assert!(!client.is_account_paused(&creator));
+        assert_eq!(client.monitor().len(), 1);
+    }
+
     // ── Dependency Tests ─────────────────────────────────────────────────────
 
     #[test]
@@ -1627,7 +2073,7 @@ mod tests {
         let keeper = Address::generate(&env);
         set_timestamp(&env, 3600);
         let result = client.try_execute(&keeper, &task2_id);
-        
+
         assert_eq!(
             result,
             Err(Ok(soroban_sdk::Error::from_contract_error(
@@ -1734,7 +2180,10 @@ mod tests {
         let id_a = client.register(&base_config(&env, target.clone()));
         let id_b = client.register(&base_config(&env, target));
 
-        assert_ne!(id_a, id_b, "concurrent-style registrations must not share an ID");
+        assert_ne!(
+            id_a, id_b,
+            "concurrent-style registrations must not share an ID"
+        );
         assert_eq!(id_b, id_a + 1, "IDs must be strictly sequential");
     }
 
@@ -1789,7 +2238,11 @@ mod tests {
             registered_ids.push_back(task_id);
         }
 
-        assert_eq!(registered_ids.len(), n, "must have registered exactly {n} tasks");
+        assert_eq!(
+            registered_ids.len(),
+            n,
+            "must have registered exactly {n} tasks"
+        );
 
         for i in 0..registered_ids.len() {
             let task_id = registered_ids.get(i).unwrap();
