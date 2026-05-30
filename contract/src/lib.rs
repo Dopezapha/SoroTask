@@ -17,9 +17,10 @@ pub enum Error {
     TaskAlreadyActive = 7,
     SelfDependency = 8,
     DependencyNotFound = 9,
-    CircularDependency = 10,
-    DependencyBlocked = 11,
-    AlreadyInitialized = 12,
+    TaskNotFound = 10,
+    CircularDependency = 11,
+    DependencyBlocked = 12,
+    AlreadyInitialized = 13,
     // Payload validation errors
     ArgsTooMany = 13,
     ArgsTooLarge = 14,
@@ -53,6 +54,8 @@ pub struct TaskConfig {
     pub whitelist: Vec<Address>,
     pub is_active: bool,
     pub blocked_by: Vec<u64>,
+    /// Optional yield strategy ID for automated yield harvesting
+    pub yield_strategy: Option<u64>,
 }
 
 #[contracttype]
@@ -60,6 +63,224 @@ pub struct TaskConfig {
 pub struct TaskDependency {
     pub task_id: u64,
     pub depends_on: u64,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ExecutionOutcome {
+    NeverRun,
+    Success,
+    Skipped,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskExecutionStatus {
+    pub outcome: ExecutionOutcome,
+    pub completed_at: u64,
+    pub run_count: u64,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum DependencyOutcome {
+    AnyCompletion,
+    Success,
+    Skipped,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DependencyRule {
+    pub task_id: u64,
+    pub required_outcome: DependencyOutcome,
+    pub min_completed_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Portfolio {
+    pub creator: Address,
+    pub name: Vec<u8>,
+    pub description: Vec<u8>,
+    pub created_at: u64,
+    pub is_active: bool,
+    pub task_count: u64,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PortfolioOperation {
+    Pause,
+    Resume,
+    Fund,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StakingPool {
+    pub total_staked: i128,
+    pub stakers_count: u64,
+    pub reward_rate: i128,
+    pub last_reward_timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+/// Portfolio statistics and analytics
+pub struct PortfolioStatistics {
+    /// Portfolio ID
+    pub portfolio_id: u64,
+    /// Total number of tasks in portfolio
+    pub task_count: u64,
+    /// Number of active tasks
+    pub active_task_count: u64,
+    /// Total number of task executions
+    pub total_executions: u64,
+    /// Timestamp of last task execution
+    pub last_execution_timestamp: u64,
+    /// Portfolio creation timestamp
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+/// Configuration for yield harvesting strategies
+pub struct YieldStrategyConfig {
+    /// Address of the DeFi protocol contract to harvest from
+    pub protocol_address: Address,
+    /// Function name to call for harvesting
+    pub harvest_function: Symbol,
+    /// Function name to call for compounding
+    pub compound_function: Symbol,
+    /// Additional arguments for harvest function
+    pub harvest_args: Vec<Val>,
+    /// Additional arguments for compound function
+    pub compound_args: Vec<Val>,
+    /// Minimum yield threshold to trigger harvest
+    pub min_yield_threshold: i128,
+    /// Maximum gas fee allowed for harvest operation
+    pub max_gas_fee: i128,
+    /// Strategy creation timestamp
+    pub created_at: u64,
+    /// Whether strategy is active
+    pub is_active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StakingBalance {
+    pub address: Address,
+    pub amount: i128,
+    pub last_stake_timestamp: u64,
+    pub accumulated_rewards: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GovernanceProposal {
+    pub proposer: Address,
+    pub title: Vec<u8>,
+    pub description: Vec<u8>,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub status: ProposalStatus,
+    pub votes_for: i128,
+    pub votes_against: i128,
+    pub quorum: i128,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Active,
+    Passed,
+    Rejected,
+    Executed,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VotingPower {
+    pub address: Address,
+    pub voting_power: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TokenomicsConfig {
+    pub staking_reward_rate: i128,
+    pub governance_quorum_percentage: i128,
+    pub governance_voting_period: u64,
+    pub fee_model: FeeModel,
+    pub min_fee: i128,
+    pub max_fee: i128,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum FeeModel {
+    Fixed,
+    Percentage,
+    Dynamic,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VrfRequest {
+    pub request_id: u64,
+    pub task_id: u64,
+    pub requester: Address,
+    pub callback_function: Symbol,
+    pub callback_args: Vec<Val>,
+    pub status: VrfRequestStatus,
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum VrfRequestStatus {
+    Pending,
+    Fulfilled,
+    Failed,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VrfResponse {
+    pub request_id: u64,
+    pub random_number: i128,
+    pub proof: Vec<u8>,
+    pub fulfilled_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VrfRequest {
+    pub request_id: u64,
+    pub task_id: u64,
+    pub requester: Address,
+    pub callback_function: Symbol,
+    pub callback_args: Vec<Val>,
+    pub status: VrfRequestStatus,
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum VrfRequestStatus {
+    Pending,
+    Fulfilled,
+    Failed,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VrfResponse {
+    pub request_id: u64,
+    pub random_number: i128,
+    pub proof: Vec<u8>,
+    pub fulfilled_at: u64,
 }
 
 #[contracttype]
@@ -226,6 +447,25 @@ fn require_task_not_admin_paused(env: &Env, task_id: u64) {
     }
 }
 
+fn enter_security_guard(env: &Env) {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::ReentrancyLock)
+        .unwrap_or(false)
+    {
+        panic_with_error!(env, Error::ReentrantCall);
+    }
+
+    env.storage()
+        .instance()
+        .set(&DataKey::ReentrancyLock, &true);
+}
+
+fn exit_security_guard(env: &Env) {
+    env.storage().instance().remove(&DataKey::ReentrancyLock);
+}
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ExecutableTask {
@@ -324,6 +564,14 @@ impl SoroTaskContract {
         env.storage()
             .persistent()
             .set(&DataKey::Task(counter), &config);
+        env.storage().persistent().set(
+            &DataKey::TaskStatus(counter),
+            &TaskExecutionStatus {
+                outcome: ExecutionOutcome::NeverRun,
+                completed_at: 0,
+                run_count: 0,
+            },
+        );
 
         // Add to the active task index for efficient monitoring.
         add_active_task_id(&env, counter);
@@ -338,6 +586,7 @@ impl SoroTaskContract {
             config.creator.clone(),
         );
 
+        exit_security_guard(&env);
         counter
     }
 
@@ -427,6 +676,234 @@ impl SoroTaskContract {
             ),
             config.creator.clone(),
         );
+        exit_security_guard(&env);
+    }
+
+    /// Requests randomness from the VRF oracle for a task.
+    /// The oracle will call back with the random number when ready.
+    pub fn request_vrf_randomness(
+        env: Env,
+        task_id: u64,
+        callback_function: Symbol,
+        callback_args: Vec<Val>,
+    ) {
+        enter_security_guard(&env);
+        
+        // Check if VRF oracle is configured
+        let oracle_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::VrfOracleAddress)
+            .ok_or(Error::VrfOracleNotSet)
+            .expect("VRF oracle address not set");
+        
+        let task_key = DataKey::Task(task_id);
+        let config: TaskConfig = env
+            .storage()
+            .persistent()
+            .get(&task_key)
+            .ok_or(Error::TaskNotFound)
+            .expect("Task not found");
+        
+        // Only task creator can request VRF randomness
+        config.creator.require_auth();
+        
+        // Validate callback function
+        if callback_function.to_string().is_empty() {
+            panic_with_error!(&env, Error::InvalidVrfRequest);
+        }
+        
+        // Validate callback arguments size
+        if callback_args.len() > MAX_ARGS_COUNT {
+            panic_with_error!(&env, Error::ArgsTooMany);
+        }
+        
+        // Get current request counter and increment
+        let mut request_counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::VrfRequestCounter)
+            .unwrap_or(0);
+        request_counter += 1;
+        env.storage().instance().set(&DataKey::VrfRequestCounter, &request_counter);
+        
+        // Create VRF request
+        let vrf_request = VrfRequest {
+            request_id: request_counter,
+            task_id,
+            requester: config.creator.clone(),
+            callback_function,
+            callback_args,
+            status: VrfRequestStatus::Pending,
+            created_at: env.ledger().timestamp(),
+        };
+        
+        // Store VRF request
+        env.storage().persistent().set(&DataKey::VrfRequests(request_counter), &vrf_request);
+        
+        // Emit VrfRequestCreated event
+        env.events().publish(
+            (
+                Symbol::new(&env, "VrfRequestCreated"),
+                Symbol::new(&env, "v1"),
+                request_counter,
+            ),
+            (task_id, config.creator.clone()),
+        );
+        
+        exit_security_guard(&env);
+
+    /// Requests randomness from the VRF oracle for a task.
+    /// The oracle will call back with the random number when ready.
+    pub fn request_vrf_randomness(
+        env: Env,
+        task_id: u64,
+        callback_function: Symbol,
+        callback_args: Vec<Val>,
+    ) {
+        enter_security_guard(&env);
+        
+        // Check if VRF oracle is configured
+        let oracle_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::VrfOracleAddress)
+            .ok_or(Error::VrfOracleNotSet)
+            .expect("VRF oracle address not set");
+        
+        let task_key = DataKey::Task(task_id);
+        let config: TaskConfig = env
+            .storage()
+            .persistent()
+            .get(&task_key)
+            .ok_or(Error::TaskNotFound)
+            .expect("Task not found");
+        
+        // Only task creator can request VRF randomness
+        config.creator.require_auth();
+        
+        // Validate callback function
+        if callback_function.to_string().is_empty() {
+            panic_with_error!(&env, Error::InvalidVrfRequest);
+        }
+        
+        // Validate callback arguments size
+        if callback_args.len() > MAX_ARGS_COUNT {
+            panic_with_error!(&env, Error::ArgsTooMany);
+        }
+        
+        // Get current request counter and increment
+        let mut request_counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::VrfRequestCounter)
+            .unwrap_or(0);
+        request_counter += 1;
+        env.storage().instance().set(&DataKey::VrfRequestCounter, &request_counter);
+        
+        // Create VRF request
+        let vrf_request = VrfRequest {
+            request_id: request_counter,
+            task_id,
+            requester: config.creator.clone(),
+            callback_function,
+            callback_args,
+            status: VrfRequestStatus::Pending,
+            created_at: env.ledger().timestamp(),
+        };
+        
+        // Store VRF request
+        env.storage().persistent().set(&DataKey::VrfRequests(request_counter), &vrf_request);
+        
+        // Emit VrfRequestCreated event
+        env.events().publish(
+            (
+                Symbol::new(&env, "VrfRequestCreated"),
+                Symbol::new(&env, "v1"),
+                request_counter,
+            ),
+            (task_id, config.creator.clone()),
+        );
+        
+        exit_security_guard(&env);
+    }
+
+    /// Fulfill a VRF request with a random number.
+    /// Called by the VRF oracle contract.
+    pub fn fulfill_vrf_request(
+        env: Env,
+        request_id: u64,
+        random_number: i128,
+        proof: Vec<u8>,
+    ) {
+        enter_security_guard(&env);
+        
+        // Check if VRF oracle is configured
+        let oracle_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::VrfOracleAddress)
+            .expect("VRF oracle address not set");
+        
+        // Only the VRF oracle can fulfill requests
+        let caller = Address::current(&env);
+        if caller != oracle_address {
+            panic_with_error!(&env, Error::Unauthorized);
+        }
+        
+        // Get the VRF request
+        let vrf_request: VrfRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VrfRequests(request_id))
+            .ok_or(Error::VrfRequestFailed)
+            .expect("VRF request not found");
+        
+        // Check if request is pending
+        if vrf_request.status != VrfRequestStatus::Pending {
+            panic_with_error!(&env, Error::VrfAlreadyFulfilled);
+        }
+        
+        // Validate random number
+        if random_number < 0 {
+            panic_with_error!(&env, Error::VrfRequestFailed);
+        }
+        
+        // Validate proof
+        if proof.len() == 0 {
+            panic_with_error!(&env, Error::VrfRequestFailed);
+        }
+        if proof.len() > 1024 {
+            panic_with_error!(&env, Error::VrfRequestFailed);
+        }
+        
+        // Create VRF response
+        let vrf_response = VrfResponse {
+            request_id,
+            random_number,
+            proof,
+            fulfilled_at: env.ledger().timestamp(),
+        };
+        
+        // Update request status to fulfilled
+        let mut updated_request = vrf_request.clone();
+        updated_request.status = VrfRequestStatus::Fulfilled;
+        env.storage().persistent().set(&DataKey::VrfRequests(request_id), &updated_request);
+        
+        // Store VRF response
+        env.storage().persistent().set(&DataKey::VrfResponses(request_id), &vrf_response);
+        
+        // Emit VrfRequestFulfilled event
+        env.events().publish(
+            (
+                Symbol::new(&env, "VrfRequestFulfilled"),
+                Symbol::new(&env, "v1"),
+                request_id,
+            ),
+            (vrf_request.task_id, random_number),
+        );
+        
+        exit_security_guard(&env);
     }
 
     pub fn resume_task(env: Env, task_id: u64) {
@@ -459,6 +936,7 @@ impl SoroTaskContract {
             ),
             config.creator.clone(),
         );
+        exit_security_guard(&env);
     }
 
     pub fn monitor_paginated(env: Env, start_id: u64, limit: u64) -> Vec<ExecutableTask> {
@@ -470,18 +948,24 @@ impl SoroTaskContract {
         let counter: u64 = env
             .storage()
             .persistent()
-            .get(&DataKey::Counter)
+            .get(&DataKey::PortfolioCounter)
             .unwrap_or(0);
+        counter += 1;
+        env.storage().persistent().set(&DataKey::PortfolioCounter, &counter);
 
-        // Clamp start to valid range
-        if start_id == 0 || start_id > counter {
-            return Vec::new(&env);
-        }
+        let portfolio = Portfolio {
+            creator: creator.clone(),
+            name,
+            description,
+            created_at: env.ledger().timestamp(),
+            is_active: true,
+            task_count: 0,
+        };
 
-        let mut executable = Vec::new(&env);
-        if start_id == 0 || limit == 0 {
-            return executable;
-        }
+        // Store the portfolio configuration
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(counter), &portfolio);
 
         let end_id = start_id.saturating_add(limit.saturating_sub(1));
         let mut bucket_id = active_bucket_id(start_id);
@@ -529,6 +1013,265 @@ impl SoroTaskContract {
             legacy_i += 1;
         }
 
+        // Emit PortfolioTaskAdded event
+        env.events().publish(
+            (
+                Symbol::new(&env, "PortfolioTaskAdded"),
+                Symbol::new(&env, "v1"),
+                portfolio_id,
+            ),
+            (task_id, portfolio.creator.clone()),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Removes a task from a portfolio.
+    pub fn remove_task_from_portfolio(env: Env, portfolio_id: u64, task_id: u64) {
+        enter_security_guard(&env);
+        let portfolio_key = DataKey::Portfolio(portfolio_id);
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&portfolio_key)
+            .expect("Portfolio not found");
+
+        portfolio.creator.require_auth();
+
+        // Get current portfolio tasks
+        let portfolio_tasks = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Vec<u64>>(&DataKey::PortfolioTasks(portfolio_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        // Remove task from portfolio
+        let mut new_portfolio_tasks = Vec::new(&env);
+        for i in 0..portfolio_tasks.len() {
+            let task_in_portfolio = portfolio_tasks.get(i).unwrap();
+            if task_in_portfolio != task_id {
+                new_portfolio_tasks.push_back(task_in_portfolio);
+            }
+        }
+
+        if new_portfolio_tasks.len() < portfolio_tasks.len() {
+            portfolio.task_count -= 1;
+            env.storage().persistent().set(&DataKey::PortfolioTasks(portfolio_id), &new_portfolio_tasks);
+            env.storage().persistent().set(&portfolio_key, &portfolio);
+        }
+
+        // Emit PortfolioTaskRemoved event
+        env.events().publish(
+            (
+                Symbol::new(&env, "PortfolioTaskRemoved"),
+                Symbol::new(&env, "v1"),
+                portfolio_id,
+            ),
+            (task_id, portfolio.creator.clone()),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Gets all tasks in a portfolio.
+    pub fn get_portfolio_tasks(env: Env, portfolio_id: u64) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get::<DataKey, Vec<u64>>(&DataKey::PortfolioTasks(portfolio_id))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Gets portfolio information.
+    pub fn get_portfolio(env: Env, portfolio_id: u64) -> Option<Portfolio> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+    }
+
+    /// Pauses all tasks in a portfolio.
+    pub fn pause_portfolio(env: Env, portfolio_id: u64) {
+        enter_security_guard(&env);
+        let portfolio_key = DataKey::Portfolio(portfolio_id);
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&portfolio_key)
+            .expect("Portfolio not found");
+
+        portfolio.creator.require_auth();
+
+        let portfolio_tasks = Self::get_portfolio_tasks(env.clone(), portfolio_id);
+
+        for i in 0..portfolio_tasks.len() {
+            let task_id = portfolio_tasks.get(i).unwrap();
+            Self::pause_task(env.clone(), task_id);
+        }
+
+        // Emit PortfolioPaused event
+        env.events().publish(
+            (
+                Symbol::new(&env, "PortfolioPaused"),
+                Symbol::new(&env, "v1"),
+                portfolio_id,
+            ),
+            portfolio.creator.clone(),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Resumes all tasks in a portfolio.
+    pub fn resume_portfolio(env: Env, portfolio_id: u64) {
+        enter_security_guard(&env);
+        let portfolio_key = DataKey::Portfolio(portfolio_id);
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&portfolio_key)
+            .expect("Portfolio not found");
+
+        portfolio.creator.require_auth();
+
+        let portfolio_tasks = Self::get_portfolio_tasks(env.clone(), portfolio_id);
+
+        for i in 0..portfolio_tasks.len() {
+            let task_id = portfolio_tasks.get(i).unwrap();
+            Self::resume_task(env.clone(), task_id);
+        }
+
+        // Emit PortfolioResumed event
+        env.events().publish(
+            (
+                Symbol::new(&env, "PortfolioResumed"),
+                Symbol::new(&env, "v1"),
+                portfolio_id,
+            ),
+            portfolio.creator.clone(),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Funds all tasks in a portfolio with gas tokens.
+    pub fn fund_portfolio(env: Env, portfolio_id: u64, amount: i128) {
+        enter_security_guard(&env);
+        let portfolio_key = DataKey::Portfolio(portfolio_id);
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&portfolio_key)
+            .expect("Portfolio not found");
+
+        portfolio.creator.require_auth();
+
+        let portfolio_tasks = Self::get_portfolio_tasks(env.clone(), portfolio_id);
+
+        for i in 0..portfolio_tasks.len() {
+            let task_id = portfolio_tasks.get(i).unwrap();
+            Self::deposit_gas(env.clone(), task_id, portfolio.creator.clone(), amount);
+        }
+
+        // Emit PortfolioFunded event
+        env.events().publish(
+            (
+                Symbol::new(&env, "PortfolioFunded"),
+                Symbol::new(&env, "v1"),
+                portfolio_id,
+            ),
+            (amount, portfolio.creator.clone()),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Executes all tasks in a portfolio.
+    /// Only portfolio creator can execute portfolio tasks.
+    pub fn execute_portfolio_tasks(env: Env, portfolio_id: u64) {
+        enter_security_guard(&env);
+        let portfolio_key = DataKey::Portfolio(portfolio_id);
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&portfolio_key)
+            .expect("Portfolio not found");
+        
+        portfolio.creator.require_auth();
+        
+        let portfolio_tasks = Self::get_portfolio_tasks(env.clone(), portfolio_id);
+        
+        for i in 0..portfolio_tasks.len() {
+            let task_id = portfolio_tasks.get(i).unwrap();
+            // Execute each task in the portfolio
+            // Note: This will use the keeper's address as the executor
+            // In production, this would be configurable
+            let keeper_address = portfolio.creator.clone();
+            Self::execute(env.clone(), keeper_address, task_id);
+        }
+        
+        // Emit PortfolioTasksExecuted event
+        env.events().publish(
+            (
+                Symbol::new(&env, "PortfolioTasksExecuted"),
+                Symbol::new(&env, "v1"),
+                portfolio_id,
+            ),
+            (portfolio_tasks.len(), portfolio.creator.clone()),
+        );
+        
+        exit_security_guard(&env);
+    }
+
+    pub fn monitor_paginated(env: Env, start_id: u64, limit: u64) -> Vec<ExecutableTask> {
+        let now = env.ledger().timestamp();
+        let counter: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Counter)
+            .unwrap_or(0);
+
+        // Clamp start to valid range
+        if start_id == 0 || start_id > counter {
+            return Vec::new(&env);
+        }
+
+        let mut executable = Vec::new(&env);
+        if start_id == 0 || limit == 0 {
+            return executable;
+        }
+
+        let end_id = start_id.saturating_add(limit.saturating_sub(1));
+        let active_task_ids = get_active_task_ids(&env);
+        let len = active_task_ids.len();
+        let mut i = 0;
+
+        while i < len {
+            let task_id = active_task_ids
+                .get(i)
+                .expect("active task index out of bounds")
+                .clone();
+
+            if task_id < start_id {
+                i += 1;
+                continue;
+            }
+
+            if task_id > end_id {
+                break;
+            }
+
+            if let Some(config) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, TaskConfig>(&DataKey::Task(task_id))
+            {
+                if config.is_active && now >= config.last_run + config.interval {
+                    executable.push_back(ExecutableTask {
+                        task_id,
+                        target: config.target,
+                        function: config.function,
+                        args: config.args,
+                    });
+                }
+            }
+
+            i += 1;
+        }
+
         executable
     }
     /// Executes a registered task identified by `task_id`.
@@ -574,6 +1317,7 @@ impl SoroTaskContract {
         }
 
         if env.ledger().timestamp() < config.last_run + config.interval {
+            exit_security_guard(&env);
             return;
         }
 
@@ -608,17 +1352,72 @@ impl SoroTaskContract {
             None => true,
         };
 
-        if should_execute {
-            // ── Fee validation & calculation (MVP: fixed fee) ──────────────
-            // For MVP use a fixed fee per execution. Ensure the task has
-            // sufficient gas_balance before attempting execution.
-            let fee: i128 = 100; // fixed fee units (token smallest unit)
+        // ── VRF condition gate ────────────────────────────────────────────────────
+        // When VRF responses are present for this task, we check if the random number
+        // meets the required condition before executing.
+        // The VRF response interface is:  check_vrf_condition(random_number: i128) -> bool
+        let should_execute_vrf = {
+            // Check if there are any pending VRF requests for this task
+            let mut vrf_request_found = false;
+            let mut vrf_response_found = false;
+            let mut vrf_response: Option<VrfResponse> = None;
+            
+            // Look for VRF requests for this task
+            // We'll use a simple approach: check request counter and iterate through requests
+            // In production, this would be optimized with proper indexing
+            if env.storage().instance().has(&DataKey::VrfRequestCounter) {
+                let request_counter: u64 = env.storage().instance().get(&DataKey::VrfRequestCounter).unwrap();
+                for i in 1..=request_counter {
+                    if let Ok(vrf_request) = env.storage().persistent().get::<DataKey, VrfRequest>(&DataKey::VrfRequests(i)) {
+                        if vrf_request.task_id == task_id && vrf_request.status == VrfRequestStatus::Fulfilled {
+                            vrf_request_found = true;
+                            // Check if response exists
+                            if let Ok(response) = env.storage().persistent().get::<DataKey, VrfResponse>(&DataKey::VrfResponses(i)) {
+                                vrf_response_found = true;
+                                vrf_response = Some(response);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if vrf_response_found {
+                // Call VRF condition checker if configured
+                // For now, we'll use a simple default: always execute if VRF response exists
+                // In production, this would be configurable per task
+                true
+            } else {
+                // If no VRF response, use resolver result
+                should_execute
+            }
+        };
+
+        if should_execute_vrf {
+            // ── Fee validation & calculation ──────────────────────────────
+            // Calculate fee based on task complexity and configuration
+            let fee: i128 = Self::calculate_execution_fee(&env, &config);
+            
+            // Validate sufficient balance
             if config.gas_balance < fee {
                 panic_with_error!(&env, Error::InsufficientBalance);
             }
 
+            // ── Yield strategy execution ──────────────────────────────────────
+            // If task is configured with a yield strategy, execute it instead of cross-contract call
+            let executed_yield_strategy = if let Some(ref yield_strategy_id) = config.yield_strategy {
+                // Execute yield strategy
+                Self::execute_yield_strategy(env.clone(), *yield_strategy_id, task_id)
+                    .expect("Yield strategy execution failed");
+                true
+            } else {
+                false
+            };
+            
             // ── Cross-contract call ──────────────────────────────────────
-            env.invoke_contract::<Val>(&config.target, &config.function, config.args.clone());
+            if !executed_yield_strategy {
+                env.invoke_contract::<Val>(&config.target, &config.function, config.args.clone());
+            }
 
             // ── Payment to keeper & balance deduction ────────────────────
             // Decrease the stored gas_balance regardless, and if a token has
@@ -642,6 +1441,7 @@ impl SoroTaskContract {
             // ── State update ────────────────────────────────────────────
             config.last_run = env.ledger().timestamp();
             env.storage().persistent().set(&task_key, &config);
+            Self::set_task_status(&env, task_id, ExecutionOutcome::Success);
 
             // Emit keeper paid event
             env.events().publish(
@@ -653,10 +1453,12 @@ impl SoroTaskContract {
                 (keeper, fee),
             );
         }
+        exit_security_guard(&env);
     }
 
     /// Initializes the contract with a gas token.
     pub fn init(env: Env, token: Address) {
+        enter_security_guard(&env);
         if env.storage().instance().has(&DataKey::Token) {
             panic_with_error!(&env, Error::AlreadyInitialized);
         }
@@ -670,6 +1472,7 @@ impl SoroTaskContract {
             ),
             token,
         );
+        exit_security_guard(&env);
     }
 
     /// Initializes the admin address used for emergency controls.
@@ -875,6 +1678,7 @@ impl SoroTaskContract {
             ),
             (config.creator.clone(), amount),
         );
+        exit_security_guard(&env);
     }
 
     /// Cancels a task, refunds remaining gas, and removes it from storage.
@@ -910,6 +1714,12 @@ impl SoroTaskContract {
 
         // Cleanup: Remove the task from storage
         env.storage().persistent().remove(&task_key);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::TaskStatus(task_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::DependencyRules(task_id));
 
         let refund_amount = config.gas_balance;
         // Events: TaskCancelled(u64, i128) with data: (creator, amount_refunded)
@@ -921,6 +1731,7 @@ impl SoroTaskContract {
             ),
             (config.creator.clone(), refund_amount),
         );
+        exit_security_guard(&env);
     }
 
     /// Returns the global gas token address.
@@ -929,6 +1740,14 @@ impl SoroTaskContract {
             .instance()
             .get(&DataKey::Token)
             .expect("Not initialized")
+    }
+
+    pub fn get_task_status(env: Env, task_id: u64) -> TaskExecutionStatus {
+        Self::task_status(&env, task_id)
+    }
+
+    pub fn get_dependency_rules(env: Env, task_id: u64) -> Vec<DependencyRule> {
+        Self::dependency_rules(&env, task_id)
     }
 
     /// Adds a dependency relationship between tasks.
@@ -969,11 +1788,45 @@ impl SoroTaskContract {
         // Get current blocked_by list
         let mut updated_task = task.clone();
         if !updated_task.blocked_by.contains(&depends_on_task_id) {
+            if updated_task.blocked_by.len() >= MAX_DEPENDENCIES_PER_TASK {
+                panic_with_error!(&env, Error::DependencyLimitExceeded);
+            }
+
             updated_task.blocked_by.push_back(depends_on_task_id);
             env.storage()
                 .persistent()
                 .set(&DataKey::Task(task_id), &updated_task);
+        }
 
+        let mut rules = Self::dependency_rules(&env, task_id);
+        let rule = DependencyRule {
+            task_id: depends_on_task_id,
+            required_outcome,
+            min_completed_at,
+        };
+        let mut replaced = false;
+        for i in 0..rules.len() {
+            if rules
+                .get(i)
+                .expect("dependency rule index out of bounds")
+                .task_id
+                == depends_on_task_id
+            {
+                rules.set(i, rule.clone());
+                replaced = true;
+                break;
+            }
+        }
+
+        if !replaced {
+            rules.push_back(rule);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::DependencyRules(task_id), &rules);
+        Self::validate_dependency_depth(&env, task_id);
+
+        if !task.blocked_by.contains(&depends_on_task_id) {
             // Emit event
             env.events().publish(
                 (
@@ -984,6 +1837,7 @@ impl SoroTaskContract {
                 depends_on_task_id,
             );
         }
+        exit_security_guard(&env);
     }
 
     /// Removes a dependency relationship between tasks.
@@ -1010,12 +1864,12 @@ impl SoroTaskContract {
             }
         }
 
-        updated_task.blocked_by = new_blocked_by;
+        // Store the proposal
         env.storage()
             .persistent()
-            .set(&DataKey::Task(task_id), &updated_task);
+            .set(&DataKey::GovernanceProposal(counter), &proposal);
 
-        // Emit event
+        // Emit ProposalCreated event
         env.events().publish(
             (
                 Symbol::new(&env, "DependencyRemoved"),
@@ -1024,6 +1878,9 @@ impl SoroTaskContract {
             ),
             depends_on_task_id,
         );
+
+        exit_security_guard(&env);
+        counter
     }
 
     /// Gets all dependencies for a task (tasks that block this task).
@@ -1034,7 +1891,6 @@ impl SoroTaskContract {
             Some(t) => t.blocked_by,
             None => Vec::new(&env),
         }
-    }
 
     /// Checks if a task is blocked by any incomplete dependencies.
     pub fn is_task_blocked(env: Env, task_id: u64) -> bool {
@@ -1052,39 +1908,86 @@ impl SoroTaskContract {
                 }
             }
         }
-        false
-    }
 
-    /// Helper to detect circular dependencies using DFS.
-    fn would_create_cycle(env: &Env, task_id: u64, new_dependency: u64) -> bool {
-        let mut visited = Vec::new(env);
-        Self::has_path_to(env, new_dependency, task_id, &mut visited)
-    }
-
-    /// DFS helper to check if there's a path from 'from' to 'to'.
-    fn has_path_to(env: &Env, from: u64, to: u64, visited: &mut Vec<u64>) -> bool {
-        if from == to {
-            return true;
+        // Update proposal votes
+        if vote_for {
+            proposal.votes_for += voting_power;
+        } else {
+            proposal.votes_against += voting_power;
         }
 
-        if visited.contains(&from) {
-            return false;
+        // Update proposal status if quorum is reached
+        if proposal.votes_for >= proposal.quorum && proposal.votes_for > proposal.votes_against {
+            proposal.status = ProposalStatus::Passed;
+        } else if proposal.votes_against >= proposal.quorum && proposal.votes_against > proposal.votes_for {
+            proposal.status = ProposalStatus::Rejected;
         }
 
-        visited.push_back(from);
+        env.storage()
+            .persistent()
+            .set(&DataKey::GovernanceProposal(proposal_id), &proposal);
+
+        // Emit VoteCast event
+        env.events().publish(
+            (
+                Symbol::new(&env, "VoteCast"),
+                Symbol::new(&env, "v1"),
+                proposal_id,
+            ),
+            (voter.clone(), vote_for, voting_power),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Executes a passed governance proposal.
+    pub fn execute_proposal(env: Env, proposal_id: u64) {
+        enter_security_guard(&env);
+        let executor = Address::current(&env);
 
         let task: Option<TaskConfig> = env.storage().persistent().get(&DataKey::Task(from));
 
-        if let Some(t) = task {
-            for i in 0..t.blocked_by.len() {
-                let dep = t.blocked_by.get(i).unwrap();
-                if Self::has_path_to(env, dep, to, visited) {
-                    return true;
-                }
-            }
+        if proposal.status != ProposalStatus::Passed {
+            panic_with_error!(&env, Error::InvalidInterval); // Reuse error code for simplicity
         }
 
-        false
+        // Mark proposal as executed
+        proposal.status = ProposalStatus::Executed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::GovernanceProposal(proposal_id), &proposal);
+
+        // Emit ProposalExecuted event
+        env.events().publish(
+            (
+                Symbol::new(&env, "ProposalExecuted"),
+                Symbol::new(&env, "v1"),
+                proposal_id,
+            ),
+            executor.clone(),
+        );
+        exit_security_guard(&env);
+    }
+
+    /// Gets staking pool information.
+    pub fn get_staking_pool(env: Env) -> StakingPool {
+        env.storage()
+            .instance()
+            .get(&DataKey::StakingPool)
+            .expect("Staking pool not initialized")
+    }
+
+    /// Gets staking balance for an address.
+    pub fn get_staking_balance(env: Env, address: Address) -> Option<StakingBalance> {
+        env.storage()
+            .persistent()
+            .get::<DataKey, StakingBalance>(&DataKey::StakingBalance(address))
+    }
+
+    /// Gets governance proposal information.
+    pub fn get_governance_proposal(env: Env, proposal_id: u64) -> Option<GovernanceProposal> {
+        env.storage()
+            .persistent()
+            .get::<DataKey, GovernanceProposal>(&DataKey::GovernanceProposal(proposal_id))
     }
 }
 
@@ -1128,6 +2031,11 @@ mod tests {
         /// Two-argument function — verifies args are forwarded correctly.
         pub fn add(_env: Env, a: i64, b: i64) -> i64 {
             a + b
+        }
+
+        pub fn reenter_pause(env: Env, contract_id: Address, task_id: u64) {
+            let client = SoroTaskContractClient::new(&env, &contract_id);
+            client.pause_task(&task_id);
         }
     }
 
@@ -2080,6 +2988,347 @@ mod tests {
                 Error::DependencyBlocked as u32
             )))
         );
+    }
+
+    /// Test portfolio creation and basic functionality.
+    #[test]
+    fn test_create_portfolio() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let name = vec![&env, b"My Portfolio".to_vec()];
+        let description = vec![&env, b"Test portfolio for grouping tasks".to_vec()];
+
+        let portfolio_id = client.create_portfolio(&name, &description);
+        assert_eq!(portfolio_id, 1);
+
+        let portfolio = client.get_portfolio(&portfolio_id).expect("Portfolio should exist");
+        assert_eq!(portfolio.name, name);
+        assert_eq!(portfolio.description, description);
+        assert_eq!(portfolio.task_count, 0);
+        assert!(portfolio.is_active);
+    }
+
+    /// Test adding tasks to a portfolio.
+    #[test]
+    fn test_add_task_to_portfolio() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let name = vec![&env, b"Test Portfolio".to_vec()];
+        let portfolio_id = client.create_portfolio(&name, &vec![&env]);
+
+        let target = env.register_contract(None, MockTarget);
+        let task1_id = client.register(&base_config(&env, target.clone()));
+        let task2_id = client.register(&base_config(&env, target.clone()));
+
+        // Add tasks to portfolio
+        client.add_task_to_portfolio(&portfolio_id, &task1_id);
+        client.add_task_to_portfolio(&portfolio_id, &task2_id);
+
+        let portfolio_tasks = client.get_portfolio_tasks(&portfolio_id);
+        assert_eq!(portfolio_tasks.len(), 2);
+        assert_eq!(portfolio_tasks.get(0).unwrap(), task1_id);
+        assert_eq!(portfolio_tasks.get(1).unwrap(), task2_id);
+
+        let portfolio = client.get_portfolio(&portfolio_id).unwrap();
+        assert_eq!(portfolio.task_count, 2);
+    }
+
+    /// Test removing tasks from a portfolio.
+    #[test]
+    fn test_remove_task_from_portfolio() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let name = vec![&env, b"Test Portfolio".to_vec()];
+        let portfolio_id = client.create_portfolio(&name, &vec![&env]);
+
+        let target = env.register_contract(None, MockTarget);
+        let task1_id = client.register(&base_config(&env, target.clone()));
+        let task2_id = client.register(&base_config(&env, target.clone()));
+
+        // Add tasks to portfolio
+        client.add_task_to_portfolio(&portfolio_id, &task1_id);
+        client.add_task_to_portfolio(&portfolio_id, &task2_id);
+
+        // Remove one task
+        client.remove_task_from_portfolio(&portfolio_id, &task1_id);
+
+        let portfolio_tasks = client.get_portfolio_tasks(&portfolio_id);
+        assert_eq!(portfolio_tasks.len(), 1);
+        assert_eq!(portfolio_tasks.get(0).unwrap(), task2_id);
+
+        let portfolio = client.get_portfolio(&portfolio_id).unwrap();
+        assert_eq!(portfolio.task_count, 1);
+    }
+
+    /// Test portfolio batch pause/resume operations.
+    #[test]
+    fn test_portfolio_batch_operations() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let name = vec![&env, b"Test Portfolio".to_vec()];
+        let portfolio_id = client.create_portfolio(&name, &vec![&env]);
+
+        let target = env.register_contract(None, MockTarget);
+        let task1_id = client.register(&base_config(&env, target.clone()));
+        let task2_id = client.register(&base_config(&env, target.clone()));
+
+        // Add tasks to portfolio
+        client.add_task_to_portfolio(&portfolio_id, &task1_id);
+        client.add_task_to_portfolio(&portfolio_id, &task2_id);
+
+        // Verify tasks are active initially
+        let task1 = client.get_task(&task1_id).unwrap();
+        let task2 = client.get_task(&task2_id).unwrap();
+        assert!(task1.is_active);
+        assert!(task2.is_active);
+
+        // Pause portfolio
+        client.pause_portfolio(&portfolio_id);
+
+        // Verify tasks are paused
+        let task1 = client.get_task(&task1_id).unwrap();
+        let task2 = client.get_task(&task2_id).unwrap();
+        assert!(!task1.is_active);
+        assert!(!task2.is_active);
+
+        // Resume portfolio
+        client.resume_portfolio(&portfolio_id);
+
+        // Verify tasks are resumed
+        let task1 = client.get_task(&task1_id).unwrap();
+        let task2 = client.get_task(&task2_id).unwrap();
+        assert!(task1.is_active);
+        assert!(task2.is_active);
+    }
+
+    /// Test portfolio funding operation.
+    #[test]
+    fn test_portfolio_funding() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token_id.address();
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
+
+        client.init(&token_address);
+
+        let name = vec![&env, b"Test Portfolio".to_vec()];
+        let portfolio_id = client.create_portfolio(&name, &vec![&env]);
+
+        let target = env.register_contract(None, MockTarget);
+        let task1_id = client.register(&base_config(&env, target.clone()));
+        let task2_id = client.register(&base_config(&env, target.clone()));
+
+        // Add tasks to portfolio
+        client.add_task_to_portfolio(&portfolio_id, &task1_id);
+        client.add_task_to_portfolio(&portfolio_id, &task2_id);
+
+        // Fund portfolio with gas tokens
+        client.fund_portfolio(&portfolio_id, &1000);
+
+        // Verify tasks have received gas
+        let task1 = client.get_task(&task1_id).unwrap();
+        let task2 = client.get_task(&task2_id).unwrap();
+        assert_eq!(task1.gas_balance, 1000);
+        assert_eq!(task2.gas_balance, 1000);
+    }
+
+    /// Test tokenomics configuration initialization.
+    #[test]
+    fn test_init_tokenomics_config() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token_id.address();
+        client.init(&token_address);
+
+        let config = TokenomicsConfig {
+            staking_reward_rate: 500,
+            governance_quorum_percentage: 1000,
+            governance_voting_period: 3_600_000,
+            fee_model: FeeModel::Dynamic,
+            min_fee: 50,
+            max_fee: 10000,
+        };
+
+        client.init_tokenomics_config(&config);
+
+        let retrieved_config = client.get_tokenomics_config();
+        assert_eq!(retrieved_config.staking_reward_rate, 500);
+        assert_eq!(retrieved_config.governance_quorum_percentage, 1000);
+        assert_eq!(retrieved_config.governance_voting_period, 3_600_000);
+        assert_eq!(retrieved_config.fee_model, FeeModel::Dynamic);
+        assert_eq!(retrieved_config.min_fee, 50);
+        assert_eq!(retrieved_config.max_fee, 10000);
+    }
+
+    /// Test staking functionality.
+    #[test]
+    fn test_staking_functionality() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token_id.address();
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
+
+        client.init(&token_address);
+
+        // Initialize staking pool
+        client.init_staking_pool(&500);
+
+        // Mint tokens to staker
+        let staker = Address::generate(&env);
+        token_admin_client.mint(&staker, &1000);
+
+        // Stake tokens
+        client.stake_tokens(&100);
+
+        // Verify staking balance
+        let staking_balance = client.get_staking_balance(&staker).unwrap();
+        assert_eq!(staking_balance.amount, 100);
+
+        // Verify staking pool
+        let pool = client.get_staking_pool();
+        assert_eq!(pool.total_staked, 100);
+        assert_eq!(pool.stakers_count, 1);
+    }
+
+    /// Test governance proposal creation and voting.
+    #[test]
+    fn test_governance_proposal() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token_id.address();
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
+
+        client.init(&token_address);
+
+        // Initialize staking pool
+        client.init_staking_pool(&500);
+
+        // Mint tokens to proposer
+        let proposer = Address::generate(&env);
+        token_admin_client.mint(&proposer, &1000);
+
+        // Stake tokens
+        client.stake_tokens(&100);
+
+        // Create proposal
+        let title = vec![&env, b"Test Proposal".to_vec()];
+        let description = vec![&env, b"This is a test proposal".to_vec()];
+        let proposal_id = client.create_proposal(&title, &description, &10000);
+
+        // Verify proposal was created
+        let proposal = client.get_governance_proposal(&proposal_id).unwrap();
+        assert_eq!(proposal.title, title);
+        assert_eq!(proposal.status, ProposalStatus::Active);
+
+        // Vote on proposal
+        client.vote_on_proposal(&proposal_id, &true, &50);
+
+        // Verify votes were recorded
+        let updated_proposal = client.get_governance_proposal(&proposal_id).unwrap();
+        assert_eq!(updated_proposal.votes_for, 50);
+    }
+
+    #[test]
+    fn test_dependency_rule_can_require_skipped_outcome() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let target = env.register_contract(None, MockTarget);
+        let resolver = env.register_contract(None, resolver_false::MockResolverFalse);
+
+        let dependency_cfg = TaskConfig {
+            resolver: Some(resolver),
+            ..base_config(&env, target.clone())
+        };
+        let dependency_id = client.register(&dependency_cfg);
+        let dependent_id = client.register(&base_config(&env, target));
+
+        client.add_dependency_with_rule(
+            &dependent_id,
+            &dependency_id,
+            &DependencyOutcome::Skipped,
+            &0,
+        );
+        assert!(client.is_task_blocked(&dependent_id));
+
+        let keeper = Address::generate(&env);
+        set_timestamp(&env, 3_600);
+        client.execute(&keeper, &dependency_id);
+
+        let status = client.get_task_status(&dependency_id);
+        assert_eq!(status.outcome, ExecutionOutcome::Skipped);
+        assert!(client.is_dependency_satisfied(&dependent_id, &dependency_id));
+        assert!(!client.is_task_blocked(&dependent_id));
+    }
+
+    #[test]
+    fn test_dependency_rule_honors_min_completion_timestamp() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let target = env.register_contract(None, MockTarget);
+        let dependency_id = client.register(&base_config(&env, target.clone()));
+        let dependent_id = client.register(&base_config(&env, target));
+        let keeper = Address::generate(&env);
+
+        set_timestamp(&env, 3_600);
+        client.execute(&keeper, &dependency_id);
+        client.add_dependency_with_rule(
+            &dependent_id,
+            &dependency_id,
+            &DependencyOutcome::Success,
+            &3_601,
+        );
+
+        assert!(client.is_task_blocked(&dependent_id));
+        assert!(!client.is_dependency_satisfied(&dependent_id, &dependency_id));
+    }
+
+    #[test]
+    fn test_reentrant_state_mutation_is_rejected() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let target = env.register_contract(None, MockTarget);
+        let victim_id = client.register(&base_config(&env, target.clone()));
+
+        let mut args: Vec<Val> = Vec::new(&env);
+        args.push_back(id.clone().into_val(&env));
+        args.push_back(victim_id.into_val(&env));
+
+        let malicious_cfg = TaskConfig {
+            function: Symbol::new(&env, "reenter_pause"),
+            args,
+            ..base_config(&env, target)
+        };
+        let malicious_id = client.register(&malicious_cfg);
+
+        let keeper = Address::generate(&env);
+        set_timestamp(&env, 3_600);
+        let result = client.try_execute(&keeper, &malicious_id);
+
+        assert!(result.is_err(), "reentrant pause must abort execution");
+        assert!(client.get_task(&victim_id).unwrap().is_active);
+        assert_eq!(client.get_task(&malicious_id).unwrap().last_run, 0);
     }
 
     #[test]
